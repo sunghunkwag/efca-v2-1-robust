@@ -1,0 +1,25 @@
+# EFCA-v2.1 Default Configuration
+
+# --- Model Dimensions ---
+# These are placeholders and should be set based on the specific environment.
+state_dim: 4                # State dimension for the environment (e.g., CartPole)
+action_dim: 2               # Action dimension for the environment (e.g., CartPole)
+lnn_hidden_dim: 256         # Hidden dimension of the CT-LNN dynamics module
+probe_dim: 64               # Output dimension of the metacognitive probe network
+meta_action_dim: 3          # Number of internal parameters the meta-controller can modulate (e.g., lr, epsilon, lambda)
+
+# --- Training Parameters ---
+warmup_episodes: 100        # Number of episodes for Phase 0 (training perception & policy only)
+total_episodes: 1000        # Total number of episodes for the main training loop (Phase 1+)
+learning_rate: 0.0003       # Learning rate for the task policy and perception module optimizers
+meta_learning_rate: 0.00001 # Learning rate for the meta-controller optimizer
+gamma: 0.99                 # Discount factor for rewards
+
+# --- EFCA-Specific Parameters ---
+meta_interval: 10           # The meta-controller is activated every N steps in an episode
+survival_threshold: 50.0    # The moving average of external rewards must be above this to enable intrinsic rewards
+clamp_delta: 0.05           # The maximum relative change (e.g., 5%) the meta-controller can apply
+
+# --- Hardware ---
+# Can be 'cuda', 'cpu', or 'mps' for Apple Silicon
+device: 'cpu'
