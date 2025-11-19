@@ -1,7 +1,6 @@
 import gymnasium as gym
 import torch
 import torch.nn as nn
-import torch.nn as nn
 import torch.optim as optim
 import yaml
 from efca.dynamics.ct_lnn import CTLNN
