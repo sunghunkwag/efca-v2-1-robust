@@ -1,0 +1,33 @@
+# EFCA-v2.1 Default Configuration
+
+# Training settings
+training:
+  num_episodes: 1000
+  batch_size: 64
+  learning_rate: 0.001
+  device: 'cpu' # Default to 'cpu' for broader compatibility
+  epsilon_start: 0.5
+  survival_threshold: 10.0
+
+# H-JEPA settings
+h_jepa:
+  embed_dim: 768
+
+# CT-LNN settings
+ct_lnn:
+  input_dim: 768 # Should match H-JEPA's embed_dim
+  hidden_dim: 256
+  output_dim: 256
+
+# Task Policy settings
+task_policy:
+  hidden_dim: 256 # Should match CT-LNN's output_dim
+  action_dim: 2 # Example for a simple environment like CartPole
+
+# Probe Network settings
+probe_network:
+  probe_dim: 64
+
+# Meta-Controller settings
+meta_controller:
+  max_delta: 0.05
