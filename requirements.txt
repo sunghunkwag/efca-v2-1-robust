@@ -1,6 +1,2 @@
-torch>=2.0.0
-torchvision
-numpy
-timm
-wandb
-torchdiffeq
+
+playwright
