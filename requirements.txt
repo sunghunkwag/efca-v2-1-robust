@@ -3,3 +3,4 @@ gymnasium
 timm
 torchvision
 pyyaml
+gymnasium[mujoco]

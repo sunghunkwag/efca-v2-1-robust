@@ -36,7 +36,11 @@ class EFCAgent(nn.Module):
                 return c.get(key)
             return getattr(c, key, None)
 
-        self.perception = HJEPA(embed_dim=get_cfg(get_cfg(config, 'h_jepa'), 'embed_dim'))
+        h_jepa_cfg = get_cfg(config, 'h_jepa')
+        self.perception = HJEPA(
+            embed_dim=get_cfg(h_jepa_cfg, 'embed_dim'),
+            input_shape=get_cfg(h_jepa_cfg, 'input_shape')
+        )
 
         # SGWT expects a config object/dict itself in its __init__
         self.bottleneck = SGWT(get_cfg(config, 'bottleneck'))
@@ -51,7 +55,8 @@ class EFCAgent(nn.Module):
         policy_cfg = get_cfg(config, 'task_policy')
         self.policy = TaskPolicy(
             hidden_dim=get_cfg(policy_cfg, 'hidden_dim'),
-            action_dim=get_cfg(policy_cfg, 'action_dim')
+            action_dim=get_cfg(policy_cfg, 'action_dim'),
+            continuous_action=get_cfg(policy_cfg, 'continuous_action')
         )
 
         if self.meta_enabled:
@@ -84,10 +89,18 @@ class EFCAgent(nn.Module):
         # 1. Perception
         perception_loss, online_features = self.perception(obs)
 
-        # online_features shape: (B, C, H, W). We need to flatten spatial dims for SGWT
+        # online_features shape:
+        # - (B, C, H, W) for vision
+        # - (B, D) for state
         # SGWT expects (B, N, D).
-        B, C, H, W = online_features.shape
-        flat_features = online_features.permute(0, 2, 3, 1).reshape(B, H*W, C)
+
+        if len(online_features.shape) == 4:
+            B, C, H, W = online_features.shape
+            flat_features = online_features.permute(0, 2, 3, 1).reshape(B, H*W, C)
+        else:
+            # State input: (B, D) -> (B, 1, D)
+            B, D = online_features.shape
+            flat_features = online_features.unsqueeze(1)
 
         # 2. Bottleneck (s-GWT)
         s_gwt = self.bottleneck(flat_features) # (B, Num_Slots, Dim)

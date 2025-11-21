@@ -14,23 +14,36 @@ class TaskPolicy(nn.Module):
     2.  A state value (the "critic"), which estimates the expected return from the current state.
     """
 
-    def __init__(self, hidden_dim: int, action_dim: int) -> None:
+    def __init__(self, hidden_dim: int, action_dim: int, continuous_action: bool = False) -> None:
         """
         Initializes the TaskPolicy module.
 
         Args:
             hidden_dim (int): The dimensionality of the input hidden state from the dynamics model.
             action_dim (int): The number of possible actions in the environment.
+            continuous_action (bool): Whether the action space is continuous.
         """
         super().__init__()
+        self.continuous_action = continuous_action
 
-        # Actor network: Maps state to an action probability distribution
-        self.actor = nn.Sequential(
-            nn.Linear(hidden_dim, 64),
-            nn.ReLU(),
-            nn.Linear(64, action_dim),
-            nn.Softmax(dim=-1),  # Outputs probabilities for each action
-        )
+        if continuous_action:
+            # Actor network for continuous actions: Maps state to mean and log_std
+            self.actor_mean = nn.Sequential(
+                nn.Linear(hidden_dim, 64),
+                nn.ReLU(),
+                nn.Linear(64, action_dim),
+                nn.Tanh(),  # Assume actions are normalized to [-1, 1] usually
+            )
+            # Learnable log standard deviation
+            self.actor_logstd = nn.Parameter(torch.zeros(1, action_dim))
+        else:
+            # Actor network: Maps state to an action probability distribution
+            self.actor = nn.Sequential(
+                nn.Linear(hidden_dim, 64),
+                nn.ReLU(),
+                nn.Linear(64, action_dim),
+                nn.Softmax(dim=-1),  # Outputs probabilities for each action
+            )
 
         # Critic network: Maps state to a single value estimate
         self.critic = nn.Sequential(
@@ -50,10 +63,17 @@ class TaskPolicy(nn.Module):
 
         Returns:
             A tuple containing:
-            - A Categorical distribution over actions.
+            - A distribution over actions (Categorical or Normal).
             - The estimated value of the state.
         """
-        action_probs = self.actor(h)
-        dist = distributions.Categorical(action_probs)
         value = self.critic(h)
+
+        if self.continuous_action:
+            mean = self.actor_mean(h)
+            std = self.actor_logstd.exp().expand_as(mean)
+            dist = distributions.Normal(mean, std)
+        else:
+            action_probs = self.actor(h)
+            dist = distributions.Categorical(action_probs)
+
         return dist, value
