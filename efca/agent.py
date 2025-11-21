@@ -100,6 +100,7 @@ class EFCAgent(nn.Module):
         # CT-LNN expects (h, input). If h is None, it initializes.
         if h is None:
             h = self.dynamics.init_state(batch_size=B).to(self.device)
+            h = self.dynamics.init_state(batch_size=B)
         h_new = self.dynamics(h, s_pooled)
 
         # 4. Policy

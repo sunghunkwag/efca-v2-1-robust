@@ -9,6 +9,27 @@ training:
   batch_size: 64
   learning_rate: 0.001
   device: 'cpu' # Default to 'cpu' for broader compatibility
+  epsilon_start: 0.5
+  survival_threshold: 10.0
+
+# H-JEPA settings (Perception)
+h_jepa:
+  embed_dim: 768
+
+# s-GWT settings (Bottleneck)
+bottleneck:
+  num_slots: 4
+  dim: 768 # Should match H-JEPA embed_dim for simple projection, or use internal projection
+  iters: 3
+  hidden_dim: 1536 # 2 * dim
+
+# CT-LNN settings (Dynamics)
+ct_lnn:
+  input_dim: 768 # Should match Bottleneck dim
+  hidden_dim: 256
+  output_dim: 256
+
+# Task Policy settings
 
 # H-JEPA settings (Perception)
 h_jepa:
@@ -33,6 +54,13 @@ task_policy:
   action_dim: 2 # Example for a simple environment like CartPole
 
 # Meta-Control settings (Disabled in Phase 0)
+# Probe Network settings
+probe_network:
+  probe_dim: 64
+
+# Meta-Controller settings
+meta_controller:
+  max_delta: 0.05
 metacontrol:
   input_dim: 64 # Placeholder input dim
   output_dim: 1
