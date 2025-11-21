@@ -10,11 +10,16 @@ from efca.metacontrol.meta_controller import MetaController
 class TestIntegration(unittest.TestCase):
     """
     Integration tests for the complete Phase 1 agent.
+
+class TestIntegration(unittest.TestCase):
+    """
+    Integration tests for the complete Phase 0 agent.
     """
 
     def test_agent_assembly_and_step(self):
         """
         Tests that the Phase 1 agent can be assembled and run for a few steps.
+        Tests that the Phase 0 agent can be assembled and run for a few steps.
         """
         try:
             # Load configuration

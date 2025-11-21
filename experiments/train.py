@@ -11,6 +11,9 @@ from efca.probe.probe_network import ProbeNetwork
 from torchvision import transforms
 
 
+from efca.agent import EFCAgent
+from torchvision import transforms
+
 def main():
     """
     Main training loop for the EFCA-v2.1 agent.
@@ -51,6 +54,18 @@ def main():
     )
     meta_optimizer = optim.Adam(
         meta_controller.parameters(), lr=config["training"]["learning_rate"]
+    )
+
+    # Initialize the unified agent
+    # Ensure action dim is set correctly from environment
+    config['task_policy']['action_dim'] = env.action_space.n
+
+    agent = EFCAgent(config)
+
+    # Initialize optimizers
+    optimizer = optim.Adam(
+        agent.parameters(),
+        lr=config["training"]["learning_rate"],
     )
 
     # Preprocessing for rendering CartPole as an image
@@ -103,6 +118,32 @@ def main():
                 action = dist.sample()
 
             # --- Environment Step ---
+    print("Agent initialized.")
+    print(f"Starting Phase {config.get('phase', 0)}: 'Zombie' Agent training loop.")
+
+    for episode in range(config["training"]["num_episodes"]):
+        obs, _ = env.reset()
+        h = None # Agent handles initialization if None
+        total_reward = 0
+        done = False
+
+        log_probs = []
+        values = []
+        rewards = []
+        perception_losses = []
+
+        while not done:
+            # Render the environment and preprocess the image
+            screen = env.render()
+            screen_tensor = resize(screen).unsqueeze(0)  # Add batch dimension (1, C, H, W)
+
+            # --- Agent's forward pass ---
+            # forward returns: dist, value, h_new, meta_delta, perception_loss
+            dist, value, h, meta_delta, p_loss = agent(screen_tensor, h=h)
+
+            action = dist.sample()
+
+            # --- Environment step ---
             obs, reward, terminated, truncated, _ = env.step(action.item())
             done = terminated or truncated
             total_reward += reward
@@ -124,7 +165,16 @@ def main():
         avg_performance = 0.9 * avg_performance + 0.1 * total_reward
 
         # --- Calculate Returns and Advantages ---
-        returns = []
+            log_probs.append(dist.log_prob(action))
+            values.append(value)
+            rewards.append(reward)
+            perception_losses.append(p_loss)
+
+        # --- Optimization step ---
+        log_probs = torch.cat(log_probs)
+        values = torch.cat(values)
+
+        # Calculate Returns (Monte Carlo)
         R = 0
         for r in reversed(rewards):
             R = r + 0.99 * R
@@ -161,6 +211,23 @@ def main():
         perception.update_target_encoder()
 
         print(f"Episode {episode + 1}: Total Reward = {total_reward}, Epsilon = {epsilon_explore:.4f}")
+        # Advantage
+        # values is (T, 1), returns is (T). Squeeze values to match.
+        advantage = returns - values.detach().squeeze()
+
+        actor_loss = -(log_probs * advantage).mean()
+        critic_loss = nn.functional.mse_loss(values.squeeze(), returns)
+
+        # Mean perception loss over the episode
+        mean_perception_loss = torch.stack(perception_losses).mean()
+
+        loss = mean_perception_loss + actor_loss + critic_loss
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        print(f"Episode {episode + 1}: Total Reward = {total_reward:.2f}, Loss = {loss.item():.4f}")
 
     env.close()
 

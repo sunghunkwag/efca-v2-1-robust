@@ -1,5 +1,8 @@
 # EFCA-v2.1 Default Configuration
 
+# Phase Control
+phase: 0 # 0: Zombie, 1: Curious, 2: Self-Tuning, 3: Fluid
+
 # Training settings
 training:
   num_episodes: 1000
@@ -20,6 +23,25 @@ ct_lnn:
   output_dim: 256
 
 # Task Policy settings
+
+# H-JEPA settings (Perception)
+h_jepa:
+  embed_dim: 768
+
+# s-GWT settings (Bottleneck)
+bottleneck:
+  num_slots: 4
+  dim: 768 # Should match H-JEPA embed_dim for simple projection, or use internal projection
+  iters: 3
+  hidden_dim: 1536 # 2 * dim
+
+# CT-LNN settings (Dynamics)
+ct_lnn:
+  input_dim: 768 # Should match Bottleneck dim
+  hidden_dim: 256
+  output_dim: 256
+
+# Task Policy settings (Action)
 task_policy:
   hidden_dim: 256 # Should match CT-LNN's output_dim
   action_dim: 2 # Example for a simple environment like CartPole
@@ -31,3 +53,6 @@ probe_network:
 # Meta-Controller settings
 meta_controller:
   max_delta: 0.05
+metacontrol:
+  input_dim: 64 # Placeholder input dim
+  output_dim: 1
