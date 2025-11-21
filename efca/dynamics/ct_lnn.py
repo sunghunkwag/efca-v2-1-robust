@@ -1,5 +1,13 @@
 import torch
 import torch.nn as nn
+from typing import Optional, Tuple
+
+try:
+    from torchdiffeq import odeint
+    TORCHDIFFEQ_AVAILABLE = True
+except ImportError:
+    TORCHDIFFEQ_AVAILABLE = False
+    print("Warning: torchdiffeq not available. ODE mode will be disabled.")
 
 
 class CTLNN(nn.Module):
@@ -11,26 +19,37 @@ class CTLNN(nn.Module):
     training. The full ODE-based mode is reserved for Phase 3.
     """
 
-    def __init__(
-        self, input_dim: int, hidden_dim: int, output_dim: int, dt: float = 0.01
-    ) -> None:
+    def __init__(self, config: dict) -> None:
         """
         Initializes the CT-LNN module.
-
+        
+        Implements Hybrid CT-LNN from specification:
+        - Discrete Mode (Phase 0-2): Standard BPTT with discrete approximation
+        - ODE Mode (Phase 3): Full ODE solver via torchdiffeq
+        
         Args:
-            input_dim (int): The dimensionality of the input from the perception module.
-            hidden_dim (int): The dimensionality of the hidden state.
-            output_dim (int): The dimensionality of the output (e.g., to the policy).
-            dt (float): The time step for the discrete Euler integration.
+            config (dict): Configuration dictionary containing parameters like
+                           input_dim, hidden_dim, output_dim, dt, tau, and mode.
         """
         super().__init__()
-        self.hidden_dim = hidden_dim
-        self.dt = dt
+        
+        self.input_dim: int = config.get('input_dim', 768)
+        self.hidden_dim: int = config.get('hidden_dim', 256)
+        self.output_dim: int = config.get('output_dim', 256)
+        self.dt: float = config.get('dt', 0.01)  # Δt in specification
+        self.tau: float = config.get('tau', 0.1)  # Time constant τ
+        
+        # Mode: 'discrete' for Phase 0-2, 'ode' for Phase 3
+        self.mode: str = config.get('mode', 'discrete')
+        
+        if self.mode == 'ode' and not TORCHDIFFEQ_AVAILABLE:
+            print("Warning: ODE mode requested but torchdiffeq not available. Falling back to discrete mode.")
+            self.mode = 'discrete'
 
         # Network layers
-        self.input_to_hidden = nn.Linear(input_dim, hidden_dim)
-        self.hidden_to_hidden = nn.Linear(hidden_dim, hidden_dim)
-        self.hidden_to_output = nn.Linear(hidden_dim, output_dim)
+        self.input_to_hidden = nn.Linear(self.input_dim, self.hidden_dim)
+        self.hidden_to_hidden = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.hidden_to_output = nn.Linear(self.hidden_dim, self.output_dim)
 
     def init_state(self, batch_size: int) -> torch.Tensor:
         """
@@ -40,9 +59,30 @@ class CTLNN(nn.Module):
             batch_size (int): The number of samples in the batch.
 
         Returns:
-            torch.Tensor: The initial hidden state.
+            torch.Tensor: The initial hidden state (B, hidden_dim).
         """
         return torch.zeros(batch_size, self.hidden_dim)
+
+    def _ode_func(self, t: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
+        """
+        The ODE function dh/dt = f(h, u) for the CT-LNN.
+        
+        Equation: dh/dt = (-h + tanh(W_in * u + W_rec * h)) / tau
+        
+        Note: 'u' (self._current_input) is assumed constant over the integration step.
+        
+        Args:
+            t (torch.Tensor): Current time (scalar).
+            h (torch.Tensor): Current hidden state (B, hidden_dim).
+            
+        Returns:
+            torch.Tensor: Derivative of hidden state (B, hidden_dim).
+        """
+        # dh/dt = (-h + f(h, u)) / tau
+        # self._current_input must be set before calling this via odeint
+        f_hu = torch.tanh(self.input_to_hidden(self._current_input) + self.hidden_to_hidden(h))
+        dh_dt = (-h + f_hu) / self.tau
+        return dh_dt
 
     def forward_discrete(self, h: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         """
@@ -57,86 +97,81 @@ class CTLNN(nn.Module):
         Returns:
             torch.Tensor: The next hidden state, mapped to the output dimension.
         """
-        # Calculate the derivative of the hidden state
-        dh_dt = torch.tanh(self.input_to_hidden(x) + self.hidden_to_hidden(h))
+        # Calculate the derivative of the hidden state: dh/dt = (-h + f(h, x)) / tau
+        f_hx = torch.tanh(self.input_to_hidden(x) + self.hidden_to_hidden(h))
+        dh_dt = (-h + f_hx) / self.tau
         # Apply Euler integration to get the next hidden state
         h_next = h + self.dt * dh_dt
 
-        # Map the hidden state to the output dimension
-        # This addresses the issue where self.hidden_to_output was unused.
-        # Note: The logic requires the output to be returned, or if h_next is used as state,
-        # we might return (h_next, output).
-        # Assuming the CT-LNN block itself is expected to output a transformed state
-        # ready for the policy, we should apply the projection.
-        # However, the next step needs 'h' to be of hidden_dim size.
-        # So we must return the new hidden state 'h_next' (hidden_dim) AND the output (output_dim).
-        # But looking at efca/agent.py:
-        #   h_new = self.dynamics(h, s_pooled)
-        #   dist, value = self.policy(h_new)
-        # The policy expects `h_new`. If `h_new` is passed back into dynamics next step, it must be hidden_dim.
-        # If policy expects hidden_dim, then hidden_to_output is redundant or policy input_dim != hidden_dim.
-        # Config says:
-        # ct_lnn: output_dim: 256
-        # task_policy: hidden_dim: 256 (input dim implicit?)
-        #
-        # To satisfy the requirement "self.hidden_to_output defined but unused",
-        # I will apply it. Since agent.py treats the return as state for next step,
-        # this implies a mismatch in the original design or a simplification where hidden_dim == output_dim.
-        # BUT, if I project it, I can't feed it back if dims differ.
-        # The prompt asks to "decide and implement".
-        #
-        # Decision: Return the projected output. The agent should maintain the hidden state separately if needed.
-        # However, `efca/agent.py` does: `h_new = self.dynamics(h, s_pooled)`. And then loops with `h = h_new`.
-        # This implies the return value IS the state.
-        # If so, `hidden_to_output` should not be used on the state itself unless output_dim == hidden_dim.
-        #
-        # Correct approach for LNNs/RNNs usually: return (output, state).
-        # I will modify `forward` to return the projected output, but I must also fix `efca/agent.py` to handle tuple return if I do that.
-        # But the prompt for `agent.py` was "add device".
-        # The prompt for `ct_lnn.py` is "use hidden_to_output".
-        #
-        # If I change the return signature, I break `agent.py` unless I fix it there too.
-        # Let's check `agent.py` again.
-        # `h_new = self.dynamics(h, s_pooled)`
-        # `dist, value = self.policy(h_new)`
-        #
-        # If I assume `h_next` is the internal state, and `output` is what goes to policy.
-        # Then `forward` should return `h_next` (for next loop) but `policy` should take `output`.
-        #
-        # To be minimally invasive but fix the "unused" warning effectively:
-        # I will apply the projection. If `hidden_dim` == `output_dim`, it works as a state transform.
-        # If they differ, the current agent code will break.
-        # Checking config: hidden_dim: 256, output_dim: 256. So they are equal.
-        # So I can apply it. But is it mathematically correct to project the state recursively?
-        # Likely `hidden_to_output` is meant as a "readout" layer.
-        #
-        # I will modify `forward` to apply the projection.
-        # Since `efca/agent.py` uses the return value as the NEXT state `h`, this is risky if it's a readout.
-        #
-        # Revised Decision: The `hidden_to_output` is a readout.
-        # The dynamics module should probably return `output`.
-        # The state maintenance is the responsibility of the loop or the module should return (output, state).
-        # Given I must fix `agent.py` anyway for device, I can update it to handle (output, state).
-        # But the user didn't ask to change the signature in `agent.py`.
-        #
-        # Alternative: The return value IS the readout. But where is the state `h` updated?
-        # In `agent.py`, `h = h_new`.
-        # If `h_new` is the readout, then we are feeding the readout back as state.
-        # If hidden_dim == output_dim, this is valid code, effectively a RNN where the output is the state.
-        # I will proceed with applying the projection to the return value.
-
-        output = self.hidden_to_output(h_next)
-        return output
-
-    def forward(self, h: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        # Map to output dimension
+        h_out = self.hidden_to_output(h_next)
+        return h_out
+    
+    def forward_ode(self, h: torch.Tensor, x: torch.Tensor, t_span: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        Main forward pass, which defaults to the discrete approximation for Phase 0-2.
-
+        ODE-based integration using torchdiffeq (Phase 3).
+        
         Args:
-            h (torch.Tensor): The current hidden state.
-            x (torch.Tensor): The current input.
-
+            h: Current hidden state (B, hidden_dim)
+            x: Input from perception (B, input_dim)
+            t_span: Time span for integration
+        
         Returns:
-            torch.Tensor: The projected output (which serves as next state in this simplified loop).
+            torch.Tensor: Next hidden state (B, output_dim)
         """
-        return self.forward_discrete(h, x)
+        if not TORCHDIFFEQ_AVAILABLE:
+            raise RuntimeError("ODE mode requires torchdiffeq. Install: pip install torchdiffeq")
+        
+        if t_span is None:
+            t_span = torch.tensor([0.0, self.dt], device=h.device)
+        
+        # Store input
+        self._current_input = x
+        
+        # ODE function
+        def ode_func(t, state):
+            f_hx = torch.tanh(self.input_to_hidden(self._current_input) + self.hidden_to_hidden(state))
+            dh_dt = (-state + f_hx) / self.tau
+            return dh_dt
+        
+        # Integrate
+        h_trajectory = odeint(ode_func, h, t_span, method='dopri5')
+        h_next = h_trajectory[-1]
+        h_out = self.hidden_to_output(h_next)
+        
+        return h_out
+
+    def forward(self, h: Optional[torch.Tensor], x: torch.Tensor, t_span: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Forward pass with automatic mode selection.
+        
+        Args:
+            h: Current hidden state or None
+            x: Input from perception (B, input_dim)
+            t_span: Time span for ODE mode
+        
+        Returns:
+            torch.Tensor: Next hidden state (B, output_dim)
+        """
+        batch_size = x.shape[0]
+        
+        if h is None:
+            h = self.init_state(batch_size).to(x.device)
+        
+        # Select mode
+        if self.mode == 'discrete':
+            return self.forward_discrete(h, x)
+        elif self.mode == 'ode':
+            return self.forward_ode(h, x, t_span)
+        else:
+            raise ValueError(f"Unknown mode: {self.mode}")
+    
+    def set_mode(self, mode: str) -> None:
+        """Switch between discrete and ODE modes."""
+        if mode not in ['discrete', 'ode']:
+            raise ValueError(f"Invalid mode: {mode}")
+        if mode == 'ode' and not TORCHDIFFEQ_AVAILABLE:
+            raise RuntimeError("ODE mode requires torchdiffeq")
+        self.mode = mode
+        print(f"CT-LNN mode: {mode}")
+```

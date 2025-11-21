@@ -9,31 +9,12 @@ training:
   batch_size: 64
   learning_rate: 0.001
   device: 'cpu' # Default to 'cpu' for broader compatibility
-  epsilon_start: 0.5
-  survival_threshold: 10.0
 
 # H-JEPA settings (Perception)
 h_jepa:
   embed_dim: 768
-
-# s-GWT settings (Bottleneck)
-bottleneck:
-  num_slots: 4
-  dim: 768 # Should match H-JEPA embed_dim for simple projection, or use internal projection
-  iters: 3
-  hidden_dim: 1536 # 2 * dim
-
-# CT-LNN settings (Dynamics)
-ct_lnn:
-  input_dim: 768 # Should match Bottleneck dim
-  hidden_dim: 256
-  output_dim: 256
-
-# Task Policy settings
-
-# H-JEPA settings (Perception)
-h_jepa:
-  embed_dim: 768
+  gamma_reg: 0.01  # L2 regularization (γ_reg in specification)
+  predictor_depth: 2
 
 # s-GWT settings (Bottleneck)
 bottleneck:
@@ -54,13 +35,20 @@ task_policy:
   action_dim: 2 # Example for a simple environment like CartPole
 
 # Meta-Control settings (Disabled in Phase 0)
-# Probe Network settings
-probe_network:
-  probe_dim: 64
-
-# Meta-Controller settings
-meta_controller:
-  max_delta: 0.05
 metacontrol:
-  input_dim: 64 # Placeholder input dim
+  input_dim: 64 # Matches probe output_dim
   output_dim: 1
+
+# Probe Network settings (For Phase 1+)
+probe:
+  h_jepa_dim: 768 # Should match H-JEPA embed_dim
+  gwt_dim: 768 # Should match Bottleneck dim
+  lnn_dim: 256 # Should match CT-LNN output_dim
+  output_dim: 64 # Output for meta-controller
+  hidden_dim: 128
+
+# Browser Integration settings
+enable_browser: false # Set to true to enable browser automation
+browser:
+  headless: false # Run browser in headless mode
+  timeout: 30000 # Default timeout in milliseconds

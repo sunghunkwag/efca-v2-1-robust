@@ -14,16 +14,22 @@ class HJEPA(nn.Module):
     online encoder, a target encoder (updated via EMA), and a predictor network.
     """
 
-    def __init__(self, embed_dim: int = 768, predictor_depth: int = 2) -> None:
+    def __init__(self, config: dict) -> None:
         """
         Initializes the H-JEPA module.
 
         Args:
-            embed_dim (int): The dimensionality of the embedding space.
-            predictor_depth (int): The number of layers in the predictor network.
+            config (dict): Configuration dictionary containing parameters like
+                           embed_dim, predictor_depth, gamma_reg, and use_hinge_loss.
         """
         super().__init__()
-        self.embed_dim = embed_dim
+        self.embed_dim = config.get('embed_dim', 768)
+        predictor_depth = config.get('predictor_depth', 2)
+        # L2 Regularization parameter (γ_reg in specification)
+        self.gamma_reg = config.get('gamma_reg', 0.01)
+        # Hinge loss fallback (specification Section 3)
+        self.use_hinge_loss = config.get('use_hinge_loss', False)
+        self.hinge_margin = config.get('hinge_margin', 1.0)
 
         # Online Encoder (ConvNeXt-Tiny)
         self.online_encoder: nn.Module = timm.create_model(
@@ -42,7 +48,7 @@ class HJEPA(nn.Module):
         # Predictor Network (MLP)
         # Note: The predictor must handle the same embedding dimension as the encoder output.
         # ConvNeXt-Tiny output dim is 768.
-        self.predictor: nn.Module = self._build_predictor(embed_dim, predictor_depth)
+        self.predictor: nn.Module = self._build_predictor(self.embed_dim, predictor_depth)
 
     def _build_predictor(self, embed_dim: int, depth: int) -> nn.Module:
         """
@@ -116,10 +122,26 @@ class HJEPA(nn.Module):
         predicted_features = predicted_features_permuted.permute(0, 3, 1, 2)
 
         # 5. Calculate the reconstruction loss on the masked patches
-        loss = nn.functional.mse_loss(
-            predicted_features * (1 - mask.float()),
-            target_features * (1 - mask.float()),
-        )
+        # Implements specification Section 2.1:
+        # L_JEPA = Σ_k λ_k (||ẑ_k - sg(z_k^target)||² + γ_reg ||z_k||²)
+        
+        if self.use_hinge_loss:
+            # Hinge loss fallback (specification Section 3 table)
+            # Use if L2 collapses
+            diff = predicted_features * (1 - mask.float()) - target_features * (1 - mask.float())
+            reconstruction_loss = torch.mean(torch.clamp(diff.norm(dim=1) - self.hinge_margin, min=0))
+        else:
+            # Standard MSE loss
+            reconstruction_loss = nn.functional.mse_loss(
+                predicted_features * (1 - mask.float()),
+                target_features * (1 - mask.float()),
+            )
+        
+        # Add L2 regularization term to prevent representation collapse
+        l2_regularization = self.gamma_reg * (online_features ** 2).mean()
+        
+        # Total loss with regularization
+        loss = reconstruction_loss + l2_regularization
 
         return loss, online_features
 

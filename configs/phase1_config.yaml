@@ -1,0 +1,61 @@
+# EFCA-v2.1 Phase 1 Configuration
+# "Curious" Agent with Meta-Controller enabled
+
+# Phase Control
+phase: 1 # Phase 1: Curious Agent
+
+# Training settings
+training:
+  num_episodes: 1000
+  batch_size: 64
+  learning_rate: 0.001
+  device: 'cpu' # Use 'cuda' for GPU if available
+  save_checkpoints: true
+  checkpoint_dir: 'checkpoints'
+  log_interval: 10
+
+# H-JEPA settings (Perception)
+h_jepa:
+  embed_dim: 768
+  ema_tau: 0.996 # Exponential moving average for target encoder
+  gamma_reg: 0.01 # L2 regularization to prevent representation collapse
+  predictor_depth: 2
+
+# s-GWT settings (Bottleneck)
+bottleneck:
+  num_slots: 4
+  dim: 768
+  iters: 3
+  hidden_dim: 1536
+
+# CT-LNN settings (Dynamics)
+ct_lnn:
+  input_dim: 768
+  hidden_dim: 256
+  output_dim: 256
+
+# Task Policy settings (Action)
+task_policy:
+  hidden_dim: 256
+  action_dim: 2
+
+# Meta-Control settings (Enabled in Phase 1)
+metacontrol:
+  input_dim: 64 # Matches probe output_dim
+  output_dim: 1 # Controls epsilon_explore in Phase 1
+  delta_max: 0.05 # Maximum percentage change per step (5%)
+  meta_interval: 10 # Low-frequency probe calls (every N steps)
+
+# Probe Network settings (Active in Phase 1)
+probe:
+  h_jepa_dim: 768
+  gwt_dim: 768
+  lnn_dim: 256
+  output_dim: 64
+  hidden_dim: 128
+
+# Browser Integration settings
+enable_browser: false
+browser:
+  headless: false
+  timeout: 30000
