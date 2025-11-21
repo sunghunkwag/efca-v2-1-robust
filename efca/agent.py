@@ -38,17 +38,13 @@ class EFCAgent(nn.Module):
                 return c.get(key)
             return getattr(c, key, None)
 
-        self.perception = HJEPA(embed_dim=get_cfg(get_cfg(config, 'h_jepa'), 'embed_dim'))
+        self.perception = HJEPA(config=get_cfg(config, 'h_jepa'))
 
         # SGWT expects a config object/dict itself in its __init__
         self.bottleneck = SGWT(get_cfg(config, 'bottleneck'))
 
         ct_lnn_cfg = get_cfg(config, 'ct_lnn')
-        self.dynamics = CTLNN(
-            input_dim=get_cfg(ct_lnn_cfg, 'input_dim'),
-            hidden_dim=get_cfg(ct_lnn_cfg, 'hidden_dim'),
-            output_dim=get_cfg(ct_lnn_cfg, 'output_dim')
-        )
+        self.dynamics = CTLNN(config=ct_lnn_cfg)
 
         policy_cfg = get_cfg(config, 'task_policy')
         self.policy = TaskPolicy(

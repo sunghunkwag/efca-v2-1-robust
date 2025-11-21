@@ -47,7 +47,19 @@ class HJEPA(nn.Module):
 
         # Predictor Network (MLP)
         # Note: The predictor must handle the same embedding dimension as the encoder output.
-        # ConvNeXt-Tiny output dim is 768.
+        # ConvNeXt-Tiny output dim is 768
+        self.backbone_dim = 768
+
+        # Projections to embedding dimension
+        self.online_projection = nn.Linear(self.backbone_dim, self.embed_dim)
+        self.target_projection = nn.Linear(self.backbone_dim, self.embed_dim)
+        
+        # Initialize target projection with online projection weights
+        self.target_projection.load_state_dict(self.online_projection.state_dict())
+        for param in self.target_projection.parameters():
+            param.requires_grad = False
+
+        # Predictor Network (MLP)
         self.predictor: nn.Module = self._build_predictor(self.embed_dim, predictor_depth)
 
     def _build_predictor(self, embed_dim: int, depth: int) -> nn.Module:
@@ -65,13 +77,6 @@ class HJEPA(nn.Module):
         for _ in range(depth):
             layers.extend([nn.Linear(embed_dim, embed_dim), nn.ReLU()])
 
-        # Add final projection to ensure output matches embed_dim (if last layer shouldn't have ReLU)
-        # or just to be explicit.
-        # The user prompt said "Check predictor dimensions".
-        # The current loop adds `depth` layers of Linear+ReLU.
-        # A predictor usually ends with a linear layer (no activation) to match target values unrestricted.
-        # So I will modify the last layer to be linear only.
-
         if len(layers) > 0:
             # Remove last ReLU
             layers.pop()
@@ -81,9 +86,6 @@ class HJEPA(nn.Module):
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass through the H-JEPA module.
-
-        This implementation performs masked patch prediction and returns both the
-        reconstruction loss and the feature representation from the online encoder.
 
         Args:
             x (torch.Tensor): The input tensor of shape (B, C, H, W).
@@ -95,9 +97,16 @@ class HJEPA(nn.Module):
         """
         # 1. Get feature representations from both encoders
         with torch.no_grad():
-            target_features = self.target_encoder(x)[-1]
+            # (B, 768, H, W) -> (B, H, W, 768)
+            target_backbone = self.target_encoder(x)[-1].permute(0, 2, 3, 1)
+            # Project to embed_dim: (B, H, W, 256)
+            target_features = self.target_projection(target_backbone)
+            # Back to (B, 256, H, W)
+            target_features = target_features.permute(0, 3, 1, 2)
 
-        online_features = self.online_encoder(x)[-1]
+        # Online path
+        online_backbone = self.online_encoder(x)[-1].permute(0, 2, 3, 1)
+        online_features = self.online_projection(online_backbone).permute(0, 3, 1, 2)
 
         # 2. Generate a mask
         mask = (
@@ -122,16 +131,10 @@ class HJEPA(nn.Module):
         predicted_features = predicted_features_permuted.permute(0, 3, 1, 2)
 
         # 5. Calculate the reconstruction loss on the masked patches
-        # Implements specification Section 2.1:
-        # L_JEPA = Σ_k λ_k (||ẑ_k - sg(z_k^target)||² + γ_reg ||z_k||²)
-        
         if self.use_hinge_loss:
-            # Hinge loss fallback (specification Section 3 table)
-            # Use if L2 collapses
             diff = predicted_features * (1 - mask.float()) - target_features * (1 - mask.float())
             reconstruction_loss = torch.mean(torch.clamp(diff.norm(dim=1) - self.hinge_margin, min=0))
         else:
-            # Standard MSE loss
             reconstruction_loss = nn.functional.mse_loss(
                 predicted_features * (1 - mask.float()),
                 target_features * (1 - mask.float()),
@@ -149,14 +152,20 @@ class HJEPA(nn.Module):
         """
         Update the target encoder's weights using an exponential moving average (EMA).
 
-        This is a common technique in self-supervised learning to create a slowly
-        progressing, more stable target representation.
-
         Args:
             tau (float): The momentum parameter for the EMA update.
         """
+        # Update backbone
         for online_param, target_param in zip(
             self.online_encoder.parameters(), self.target_encoder.parameters()
+        ):
+            target_param.data.copy_(
+                tau * target_param.data + (1 - tau) * online_param.data
+            )
+            
+        # Update projection
+        for online_param, target_param in zip(
+            self.online_projection.parameters(), self.target_projection.parameters()
         ):
             target_param.data.copy_(
                 tau * target_param.data + (1 - tau) * online_param.data

@@ -59,7 +59,9 @@ class SGWT(nn.Module):
         
         # Create a mask for non-top-k values
         # We use the k-th largest value as the threshold
-        threshold = topk_val.gather(dim, torch.tensor(k-1, device=x.device).view((1,) * (x.ndim - 1) + (1,)).expand_as(topk_val[..., :1]))
+        # We use the k-th largest value as the threshold
+        # topk_val is sorted, so the k-th largest is at index k-1
+        threshold = topk_val.select(dim, k-1).unsqueeze(dim)
         
         # Mask values below threshold with large negative number
         mask = x < threshold

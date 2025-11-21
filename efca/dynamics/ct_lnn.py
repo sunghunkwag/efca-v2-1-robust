@@ -174,4 +174,4 @@ class CTLNN(nn.Module):
             raise RuntimeError("ODE mode requires torchdiffeq")
         self.mode = mode
         print(f"CT-LNN mode: {mode}")
-```
+
