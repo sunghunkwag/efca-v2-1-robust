@@ -64,17 +64,14 @@ def run_benchmark(env_name, config_path, num_episodes=1000):
 
         while not done:
             # Agent forward pass
-            dist, value, h, meta_delta, p_loss = agent(obs_tensor, h=h)
+            # Returns: dist, value, h_new, meta_delta, perception_loss, probe_output
+            dist, value, h, meta_delta, p_loss, _ = agent(obs_tensor, h=h)
 
             action = dist.sample()
 
             # Step environment
             # Action for MuJoCo is usually float, detached from graph for step
             action_np = action.detach().cpu().numpy().flatten()
-
-            # Clip actions if necessary (though Tanh usually handles bounds [-1, 1], MuJoCo envs might need scaling)
-            # Assuming env expects actions in range, or we trust Tanh.
-            # Many MuJoCo envs are [-1, 1].
 
             obs, reward, terminated, truncated, _ = env.step(action_np)
             done = terminated or truncated
@@ -111,6 +108,9 @@ def run_benchmark(env_name, config_path, num_episodes=1000):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+        # Update target encoder
+        agent.perception.update_target_encoder()
 
         if (episode + 1) % 10 == 0:
             avg_return = np.mean(total_rewards[-10:])

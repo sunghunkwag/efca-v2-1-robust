@@ -1,6 +1,8 @@
 torch
-gymnasium
+gymnasium[mujoco]
 timm
 torchvision
 pyyaml
-gymnasium[mujoco]
+playwright
+torchdiffeq  # For Phase 3 ODE mode in CT-LNN
+numpy

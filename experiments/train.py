@@ -5,17 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 import yaml
 import os
-from efca.agent import EFCAgent
-from torchvision import transforms
-
-from efca.dynamics.ct_lnn import CTLNN
-from efca.metacontrol.meta_controller import MetaController
-from efca.perception.h_jepa import HJEPA
-from efca.policy.task_policy import TaskPolicy
-from efca.probe.probe_network import ProbeNetwork
-from torchvision import transforms
-
-
+from pathlib import Path
 from efca.agent import EFCAgent
 from torchvision import transforms
 
@@ -52,48 +42,24 @@ def main():
 
     # Initialize optimizers
     optimizer = optim.Adam(
-    # Initialize the agent's modules
-    perception = HJEPA(embed_dim=config["h_jepa"]["embed_dim"])
-    dynamics = CTLNN(
-        input_dim=config["ct_lnn"]["input_dim"],
-        hidden_dim=config["ct_lnn"]["hidden_dim"],
-        output_dim=config["ct_lnn"]["output_dim"],
-    )
-    policy = TaskPolicy(
-        hidden_dim=config["task_policy"]["hidden_dim"],
-        action_dim=env.action_space.n,
-    )
-    probe = ProbeNetwork(
-        hidden_dim=config["ct_lnn"]["hidden_dim"],
-        probe_dim=config["probe_network"]["probe_dim"],
-    )
-    meta_controller = MetaController(
-        probe_dim=config["probe_network"]["probe_dim"],
-    )
-
-    # Initialize optimizers
-    optimizer = optim.Adam(
-        list(perception.parameters())
-        + list(dynamics.parameters())
-        + list(policy.parameters())
-        + list(probe.parameters()),
-        lr=config["training"]["learning_rate"],
-    )
-    meta_optimizer = optim.Adam(
-        meta_controller.parameters(), lr=config["training"]["learning_rate"]
-    )
-
-    # Initialize the unified agent
-    # Ensure action dim is set correctly from environment
-    config['task_policy']['action_dim'] = env.action_space.n
-
-    agent = EFCAgent(config)
-
-    # Initialize optimizers
-    optimizer = optim.Adam(
         agent.parameters(),
         lr=config["training"]["learning_rate"],
     )
+
+    # Setup checkpoint directory
+    checkpoint_dir = config['training'].get('checkpoint_dir', 'checkpoints')
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    # Load checkpoint if exists
+    start_episode = 0
+    checkpoint_path = os.path.join(checkpoint_dir, 'latest_checkpoint.pt')
+    if os.path.exists(checkpoint_path):
+        print(f"Loading checkpoint from {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path)
+        agent.load_state_dict(checkpoint['agent_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_episode = checkpoint['episode']
+        print(f"Resuming from episode {start_episode}")
 
     # Preprocessing for rendering CartPole as an image
     resize = transforms.Compose(
@@ -110,50 +76,11 @@ def main():
 
     print("Agent initialized.")
     print(f"Starting Phase {config.get('phase', 0)}: 'Zombie' Agent training loop on {device}.")
-    print("Agent modules initialized.")
-    print("Starting Phase 1: 'Curious' Agent training loop.")
+    print(f"Training for {config['training']['num_episodes']} episodes")
+    print("-" * 80)
 
-    epsilon_explore = config["training"]["epsilon_start"]
-    avg_performance = 0.0
-
-    for episode in range(config["training"]["num_episodes"]):
-        obs, _ = env.reset()
-        h = None # Agent handles initialization if None
-        total_reward = 0
-        done = False
-
-        log_probs, values, rewards, intrinsic_rewards, meta_deltas = [], [], [], [], []
-
-        while not done:
-            screen = env.render()
-            screen_tensor = resize(screen).unsqueeze(0)
-
-            # --- Agent's forward pass ---
-            perception_loss, online_features = perception(screen_tensor)
-            perception_output = online_features.mean(dim=[2, 3])
-
-            h = dynamics.forward(h, perception_output)
-
-            # --- Metacognition ---
-            probe_output = probe(h)
-            meta_delta = meta_controller(probe_output)
-            epsilon_explore = max(
-                0.01, min(1.0, epsilon_explore * (1 + meta_delta.item()))
-            )
-
-            # --- Action Selection ---
-            if torch.rand(1).item() < epsilon_explore:
-                action = torch.tensor([env.action_space.sample()])
-                dist, value = policy(h)
-            else:
-                dist, value = policy(h)
-                action = dist.sample()
-
-            # --- Environment Step ---
-    print("Agent initialized.")
-    print(f"Starting Phase {config.get('phase', 0)}: 'Zombie' Agent training loop.")
-
-    for episode in range(config["training"]["num_episodes"]):
+    # Training loop
+    for episode in range(start_episode, config["training"]["num_episodes"]):
         obs, _ = env.reset()
         h = None # Agent handles initialization if None
         total_reward = 0
@@ -168,11 +95,11 @@ def main():
             # Render the environment and preprocess the image
             screen = env.render()
             screen_tensor = resize(screen).unsqueeze(0).to(device)  # Add batch dimension (1, C, H, W)
-            screen_tensor = resize(screen).unsqueeze(0)  # Add batch dimension (1, C, H, W)
 
             # --- Agent's forward pass ---
-            # forward returns: dist, value, h_new, meta_delta, perception_loss
-            dist, value, h, meta_delta, p_loss = agent(screen_tensor, h=h)
+            # forward returns: dist, value, h_new, meta_delta, perception_loss, probe_output
+            result = agent(screen_tensor, h=h)
+            dist, value, h, meta_delta, p_loss, probe_output = result
 
             # NOTE: meta_delta is currently unused in Phase 0, but verified here.
             if meta_delta is not None:
@@ -185,23 +112,6 @@ def main():
             done = terminated or truncated
             total_reward += reward
 
-            # --- Reward and Logging ---
-            intrinsic_reward = (probe_output**2).mean()
-            rewards.append(reward)
-            intrinsic_rewards.append(intrinsic_reward)
-            log_probs.append(dist.log_prob(action))
-            values.append(value)
-            meta_deltas.append(meta_delta)
-
-        # --- Optimization Step ---
-        log_probs = torch.cat(log_probs)
-        values = torch.cat(values)
-        meta_deltas = torch.cat(meta_deltas)
-
-        # Homeostatic Gate
-        avg_performance = 0.9 * avg_performance + 0.1 * total_reward
-
-        # --- Calculate Returns and Advantages ---
             log_probs.append(dist.log_prob(action))
             values.append(value)
             rewards.append(reward)
@@ -221,41 +131,6 @@ def main():
 
         # Advantage
         # values is (T, 1), returns is (T). Squeeze values to match.
-        intrinsic_returns = []
-        R_intrinsic = 0
-        for r_i in reversed(intrinsic_rewards):
-            R_intrinsic = r_i + 0.99 * R_intrinsic
-            intrinsic_returns.insert(0, R_intrinsic)
-        intrinsic_returns = torch.stack(intrinsic_returns)
-
-        advantage = returns - values.detach().squeeze()
-        intrinsic_advantage = intrinsic_returns - values.detach().squeeze()
-
-        # --- Calculate Losses ---
-        actor_loss = -(log_probs * advantage).mean()
-        critic_loss = nn.functional.mse_loss(values.squeeze(), returns)
-
-        # Mean perception loss over the episode
-        mean_perception_loss = torch.stack(perception_losses).mean()
-
-        loss = mean_perception_loss + actor_loss + critic_loss
-
-        # We need to retain the graph for the meta-controller's backward pass
-        loss.backward(retain_graph=True)
-        optimizer.step()
-        optimizer.zero_grad()
-
-        if avg_performance >= config["training"]["survival_threshold"]:
-            meta_loss = -(meta_deltas * intrinsic_advantage).mean()
-            meta_loss.backward()
-            meta_optimizer.step()
-            meta_optimizer.zero_grad()
-
-        perception.update_target_encoder()
-
-        print(f"Episode {episode + 1}: Total Reward = {total_reward}, Epsilon = {epsilon_explore:.4f}")
-        # Advantage
-        # values is (T, 1), returns is (T). Squeeze values to match.
         advantage = returns - values.detach().squeeze()
 
         actor_loss = -(log_probs * advantage).mean()
@@ -268,10 +143,51 @@ def main():
 
         optimizer.zero_grad()
         loss.backward()
+
+        # Gradient Clipping as per specification Section 4 (line 162)
+        # "Gradient Clipping is mandatory"
+        torch.nn.utils.clip_grad_norm_(agent.parameters(), max_norm=1.0)
+
         optimizer.step()
 
-        print(f"Episode {episode + 1}: Total Reward = {total_reward:.2f}, Loss = {loss.item():.4f}")
+        # Update H-JEPA target encoder with EMA
+        if hasattr(agent, 'perception') and hasattr(agent.perception, 'update_target_encoder'):
+            ema_tau = config.get('h_jepa', {}).get('ema_tau', 0.996)
+            agent.perception.update_target_encoder(tau=ema_tau)
 
+        # Logging
+        log_interval = config['training'].get('log_interval', 10)
+        if (episode + 1) % log_interval == 0:
+            print(f"Episode {episode + 1}/{config['training']['num_episodes']}: "
+                  f"Reward={total_reward:.2f}, Loss={loss.item():.4f}, "
+                  f"Perception Loss={mean_perception_loss.item():.4f}")
+
+        # Save checkpoint periodically
+        save_interval = config['training'].get('save_interval', 100)
+        if (episode + 1) % save_interval == 0:
+            checkpoint = {
+                'episode': episode + 1,
+                'agent_state_dict': agent.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'config': config
+            }
+            torch.save(checkpoint, checkpoint_path)
+            print(f"Checkpoint saved at episode {episode + 1}")
+
+    # Final checkpoint save
+    final_checkpoint = {
+        'episode': config['training']['num_episodes'],
+        'agent_state_dict': agent.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'config': config
+    }
+    final_path = os.path.join(checkpoint_dir, 'final_checkpoint.pt')
+    torch.save(final_checkpoint, final_path)
+    print(f"\nTraining complete! Final checkpoint saved to {final_path}")
+
+    # Cleanup
+    if hasattr(agent, 'cleanup'):
+        agent.cleanup()
     env.close()
 
 

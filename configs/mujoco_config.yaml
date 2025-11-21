@@ -22,17 +22,19 @@ bottleneck:
   dim: 256 # Matches H-JEPA embed_dim
   iters: 3
   hidden_dim: 512
+  topk: 2
 
 # CT-LNN settings (Dynamics)
 ct_lnn:
   input_dim: 256
   hidden_dim: 256
   output_dim: 256
+  mode: 'discrete'
 
 # Task Policy settings (Action)
 task_policy:
   hidden_dim: 256
-  continuous_action: true
+  action_space_type: 'continuous'
 
 # Meta-Control settings (Disabled in Phase 0)
 probe_network:
