@@ -63,10 +63,12 @@ class SGWT(nn.Module):
             q = self.to_q(slots)
 
             # Dot product attention
+            # Corrected einsum expression
             dots = torch.einsum('bid,bjd->bij', q, k) * (self.dim ** -0.5)
             attn = dots.softmax(dim=1) + self.eps
             attn = attn / attn.sum(dim=-1, keepdim=True) # Normalize over inputs
 
+            # Weighted mean
             updates = torch.einsum('bjd,bij->bid', v, attn)
 
             # GRU Update

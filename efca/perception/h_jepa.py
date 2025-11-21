@@ -40,6 +40,8 @@ class HJEPA(nn.Module):
             param.requires_grad = False
 
         # Predictor Network (MLP)
+        # Note: The predictor must handle the same embedding dimension as the encoder output.
+        # ConvNeXt-Tiny output dim is 768.
         self.predictor: nn.Module = self._build_predictor(embed_dim, predictor_depth)
 
     def _build_predictor(self, embed_dim: int, depth: int) -> nn.Module:
@@ -56,6 +58,18 @@ class HJEPA(nn.Module):
         layers: List[nn.Module] = []
         for _ in range(depth):
             layers.extend([nn.Linear(embed_dim, embed_dim), nn.ReLU()])
+
+        # Add final projection to ensure output matches embed_dim (if last layer shouldn't have ReLU)
+        # or just to be explicit.
+        # The user prompt said "Check predictor dimensions".
+        # The current loop adds `depth` layers of Linear+ReLU.
+        # A predictor usually ends with a linear layer (no activation) to match target values unrestricted.
+        # So I will modify the last layer to be linear only.
+
+        if len(layers) > 0:
+            # Remove last ReLU
+            layers.pop()
+
         return nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:

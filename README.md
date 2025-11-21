@@ -53,5 +53,5 @@ pip install -r requirements.txt
 The training scripts are located in the `experiments/` directory. To run an experiment, you can use the following command:
 
 ```bash
-python experiments/train.py --config configs/config.yaml
+python experiments/train.py --config configs/default_config.yaml
 ```

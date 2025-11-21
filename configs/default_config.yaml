@@ -12,13 +12,20 @@ training:
   epsilon_start: 0.5
   survival_threshold: 10.0
 
-# H-JEPA settings
+# H-JEPA settings (Perception)
 h_jepa:
   embed_dim: 768
 
-# CT-LNN settings
+# s-GWT settings (Bottleneck)
+bottleneck:
+  num_slots: 4
+  dim: 768 # Should match H-JEPA embed_dim for simple projection, or use internal projection
+  iters: 3
+  hidden_dim: 1536 # 2 * dim
+
+# CT-LNN settings (Dynamics)
 ct_lnn:
-  input_dim: 768 # Should match H-JEPA's embed_dim
+  input_dim: 768 # Should match Bottleneck dim
   hidden_dim: 256
   output_dim: 256
 
@@ -46,6 +53,7 @@ task_policy:
   hidden_dim: 256 # Should match CT-LNN's output_dim
   action_dim: 2 # Example for a simple environment like CartPole
 
+# Meta-Control settings (Disabled in Phase 0)
 # Probe Network settings
 probe_network:
   probe_dim: 64

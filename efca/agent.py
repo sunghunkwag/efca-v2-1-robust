@@ -59,6 +59,11 @@ class EFCAgent(nn.Module):
         else:
             self.meta_controller = None
 
+        # Device handling
+        self.device = get_cfg(get_cfg(config, 'training'), 'device')
+        if self.device:
+            self.to(self.device)
+
     def forward(self, obs, h=None, meta_state=None):
         """
         Args:
@@ -72,6 +77,10 @@ class EFCAgent(nn.Module):
             meta_delta: Meta-controller output (or None)
             perception_loss: Loss from perception module
         """
+        # Ensure inputs are on the correct device
+        if obs.device != self.device:
+            obs = obs.to(self.device)
+
         # 1. Perception
         perception_loss, online_features = self.perception(obs)
 
@@ -90,6 +99,7 @@ class EFCAgent(nn.Module):
         # 3. Dynamics (CT-LNN)
         # CT-LNN expects (h, input). If h is None, it initializes.
         if h is None:
+            h = self.dynamics.init_state(batch_size=B).to(self.device)
             h = self.dynamics.init_state(batch_size=B)
         h_new = self.dynamics(h, s_pooled)
 
