@@ -106,10 +106,18 @@ class EFCAgent(nn.Module):
         # 1. Perception
         perception_loss, online_features = self.perception(obs)
 
-        # online_features shape: (B, C, H, W). We need to flatten spatial dims for SGWT
+        # online_features shape:
+        # - (B, C, H, W) for vision
+        # - (B, D) for state
         # SGWT expects (B, N, D).
-        B, C, H, W = online_features.shape
-        flat_features = online_features.permute(0, 2, 3, 1).reshape(B, H*W, C)
+
+        if len(online_features.shape) == 4:
+            B, C, H, W = online_features.shape
+            flat_features = online_features.permute(0, 2, 3, 1).reshape(B, H*W, C)
+        else:
+            # State input: (B, D) -> (B, 1, D)
+            B, D = online_features.shape
+            flat_features = online_features.unsqueeze(1)
 
         # 2. Bottleneck (s-GWT)
         s_gwt = self.bottleneck(flat_features) # (B, Num_Slots, Dim)

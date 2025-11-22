@@ -61,6 +61,21 @@ def main():
         start_episode = checkpoint['episode']
         print(f"Resuming from episode {start_episode}")
 
+    # Setup checkpoint directory
+    checkpoint_dir = config['training'].get('checkpoint_dir', 'checkpoints')
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    # Load checkpoint if exists
+    start_episode = 0
+    checkpoint_path = os.path.join(checkpoint_dir, 'latest_checkpoint.pt')
+    if os.path.exists(checkpoint_path):
+        print(f"Loading checkpoint from {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path)
+        agent.load_state_dict(checkpoint['agent_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_episode = checkpoint['episode']
+        print(f"Resuming from episode {start_episode}")
+
     # Preprocessing for rendering CartPole as an image
     resize = transforms.Compose(
         [

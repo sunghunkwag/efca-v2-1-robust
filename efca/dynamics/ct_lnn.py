@@ -95,7 +95,7 @@ class CTLNN(nn.Module):
             x (torch.Tensor): The current input.
 
         Returns:
-            torch.Tensor: The next hidden state, mapped to the output dimension.
+            torch.Tensor: The next hidden state (B, hidden_dim).
         """
         # Calculate the derivative of the hidden state: dh/dt = (-h + f(h, x)) / tau
         f_hx = torch.tanh(self.input_to_hidden(x) + self.hidden_to_hidden(h))

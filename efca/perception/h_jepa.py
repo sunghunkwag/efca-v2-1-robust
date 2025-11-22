@@ -36,10 +36,20 @@ class HJEPA(nn.Module):
             "convnext_tiny", pretrained=True, features_only=True
         )
 
-        # Target Encoder (ConvNeXt-Tiny)
-        self.target_encoder: nn.Module = timm.create_model(
-            "convnext_tiny", pretrained=True, features_only=True
-        )
+        if self.is_state_input:
+            input_dim = self.input_shape[0]
+            self.online_encoder = self._build_mlp_encoder(input_dim, self.embed_dim)
+            self.target_encoder = self._build_mlp_encoder(input_dim, self.embed_dim)
+        else:
+            # Online Encoder (ConvNeXt-Tiny)
+            self.online_encoder: nn.Module = timm.create_model(
+                "convnext_tiny", pretrained=True, features_only=True
+            )
+
+            # Target Encoder (ConvNeXt-Tiny)
+            self.target_encoder: nn.Module = timm.create_model(
+                "convnext_tiny", pretrained=True, features_only=True
+            )
 
         # Freeze target encoder parameters
         for param in self.target_encoder.parameters():
@@ -83,18 +93,70 @@ class HJEPA(nn.Module):
 
         return nn.Sequential(*layers)
 
+    def _build_mlp_encoder(self, input_dim: int, embed_dim: int) -> nn.Module:
+        """
+        Builds a simple MLP encoder for state inputs.
+        """
+        return nn.Sequential(
+            nn.Linear(input_dim, embed_dim),
+            nn.LayerNorm(embed_dim),
+            nn.ReLU(),
+            nn.Linear(embed_dim, embed_dim),
+            nn.LayerNorm(embed_dim),
+        )
+
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass through the H-JEPA module.
 
         Args:
-            x (torch.Tensor): The input tensor of shape (B, C, H, W).
+            x (torch.Tensor): The input tensor.
+                - Shape (B, C, H, W) for vision.
+                - Shape (B, D) for state.
 
         Returns:
             A tuple containing:
             - The reconstruction loss.
             - The online features.
         """
+        if self.is_state_input:
+            return self._forward_state(x)
+        else:
+            return self._forward_vision(x)
+
+    def _forward_state(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        # 1. Get feature representations
+        with torch.no_grad():
+            target_features = self.target_encoder(x)
+
+        online_features = self.online_encoder(x)
+
+        # 2. Generate mask (element-wise on the feature vector)
+        # Mask shape: (B, embed_dim)
+        mask = torch.rand_like(online_features).ge(0.5).to(x.device)
+
+        # 3. Apply mask
+        masked_online_features = online_features * mask.float()
+
+        # 4. Predict
+        predicted_features = self.predictor(masked_online_features)
+
+        # 5. Loss
+        if self.use_hinge_loss:
+            diff = predicted_features * (1 - mask.float()) - target_features * (1 - mask.float())
+            reconstruction_loss = torch.mean(torch.clamp(diff.norm(dim=1) - self.hinge_margin, min=0))
+        else:
+            reconstruction_loss = nn.functional.mse_loss(
+                predicted_features * (1 - mask.float()),
+                target_features * (1 - mask.float()),
+            )
+
+        l2_regularization = self.gamma_reg * (online_features ** 2).mean()
+        loss = reconstruction_loss + l2_regularization
+
+        return loss, online_features
+
+    def _forward_vision(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         # 1. Get feature representations from both encoders
         with torch.no_grad():
             # (B, 768, H, W) -> (B, H, W, 768)

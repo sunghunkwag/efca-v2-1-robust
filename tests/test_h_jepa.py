@@ -12,7 +12,8 @@ class TestHJEPA(unittest.TestCase):
         Tests that the H-JEPA module can be initialized without errors.
         """
         try:
-            model = HJEPA()
+            config = {'embed_dim': 768}
+            model = HJEPA(config=config)
             self.assertIsInstance(model, HJEPA)
         except Exception as e:
             self.fail(f"HJEPA initialization failed with an exception: {e}")
@@ -22,7 +23,8 @@ class TestHJEPA(unittest.TestCase):
         Tests the forward pass of the H-JEPA module.
         """
         try:
-            model = HJEPA()
+            config = {'embed_dim': 768}
+            model = HJEPA(config=config)
             dummy_input = torch.randn(1, 3, 224, 224)
             loss, features = model(dummy_input)
             self.assertIsInstance(loss, torch.Tensor)
