@@ -12,7 +12,8 @@ class TestCTLNN(unittest.TestCase):
         Tests that the CT-LNN module can be initialized without errors.
         """
         try:
-            model = CTLNN(input_dim=128, hidden_dim=64, output_dim=32)
+            config = {'input_dim': 128, 'hidden_dim': 64, 'output_dim': 32}
+            model = CTLNN(config=config)
             self.assertIsInstance(model, CTLNN)
         except Exception as e:
             self.fail(f"CTLNN initialization failed with an exception: {e}")
