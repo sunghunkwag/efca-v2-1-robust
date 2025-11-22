@@ -3,6 +3,29 @@ from typing import List, Tuple
 import timm
 import torch
 import torch.nn as nn
+import numpy as np
+
+
+class StateEncoder(nn.Module):
+    """
+    Simple MLP encoder for state-based inputs.
+    Reference: dhc_ssm/adapters/rl_policy_v2.py
+    """
+    def __init__(self, input_dim, embed_dim):
+        super().__init__()
+        # Key feature: LayerNorm and Tanh for RL stability
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, embed_dim),
+            nn.LayerNorm(embed_dim),
+            nn.Tanh()
+        )
+        # Orthogonal initialization (crucial for PPO)
+        for m in self.net.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
+
+    def forward(self, x):
+        return self.net(x)
 
 
 class HJEPA(nn.Module):
@@ -31,15 +54,30 @@ class HJEPA(nn.Module):
         self.use_hinge_loss = config.get('use_hinge_loss', False)
         self.hinge_margin = config.get('hinge_margin', 1.0)
 
-        # Online Encoder (ConvNeXt-Tiny)
-        self.online_encoder: nn.Module = timm.create_model(
-            "convnext_tiny", pretrained=True, features_only=True
-        )
+        # Input type handling
+        self.input_type = config.get('input_type', 'vision')
+        self.input_dim = config.get('input_dim', None)
 
-        if self.is_state_input:
-            input_dim = self.input_shape[0]
-            self.online_encoder = self._build_mlp_encoder(input_dim, self.embed_dim)
-            self.target_encoder = self._build_mlp_encoder(input_dim, self.embed_dim)
+        if self.input_type == 'state':
+            if self.input_dim is None:
+                raise ValueError("input_dim must be provided for state input")
+
+            # Use StateEncoder for state inputs
+            self.online_encoder = StateEncoder(self.input_dim, self.embed_dim)
+            self.target_encoder = StateEncoder(self.input_dim, self.embed_dim)
+
+            # Projections are identity or integrated in StateEncoder
+            # For compatibility with update_target_encoder, we can keep them as identity or
+            # simply skip them if we adapt update_target_encoder
+            # But the original code had projections separate.
+            # StateEncoder outputs embed_dim directly.
+
+            # Let's create dummy identity projections to satisfy existing structure or set to None
+            # The original update_target_encoder iterates over projection parameters.
+            # We should probably define them as Identity or handle it.
+            self.online_projection = nn.Identity()
+            self.target_projection = nn.Identity()
+
         else:
             # Online Encoder (ConvNeXt-Tiny)
             self.online_encoder: nn.Module = timm.create_model(
@@ -51,22 +89,22 @@ class HJEPA(nn.Module):
                 "convnext_tiny", pretrained=True, features_only=True
             )
 
+            # Predictor Network (MLP)
+            # Note: The predictor must handle the same embedding dimension as the encoder output.
+            # ConvNeXt-Tiny output dim is 768
+            self.backbone_dim = 768
+
+            # Projections to embedding dimension
+            self.online_projection = nn.Linear(self.backbone_dim, self.embed_dim)
+            self.target_projection = nn.Linear(self.backbone_dim, self.embed_dim)
+
+            # Initialize target projection with online projection weights
+            self.target_projection.load_state_dict(self.online_projection.state_dict())
+            for param in self.target_projection.parameters():
+                param.requires_grad = False
+
         # Freeze target encoder parameters
         for param in self.target_encoder.parameters():
-            param.requires_grad = False
-
-        # Predictor Network (MLP)
-        # Note: The predictor must handle the same embedding dimension as the encoder output.
-        # ConvNeXt-Tiny output dim is 768
-        self.backbone_dim = 768
-
-        # Projections to embedding dimension
-        self.online_projection = nn.Linear(self.backbone_dim, self.embed_dim)
-        self.target_projection = nn.Linear(self.backbone_dim, self.embed_dim)
-        
-        # Initialize target projection with online projection weights
-        self.target_projection.load_state_dict(self.online_projection.state_dict())
-        for param in self.target_projection.parameters():
             param.requires_grad = False
 
         # Predictor Network (MLP)
@@ -93,18 +131,6 @@ class HJEPA(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def _build_mlp_encoder(self, input_dim: int, embed_dim: int) -> nn.Module:
-        """
-        Builds a simple MLP encoder for state inputs.
-        """
-        return nn.Sequential(
-            nn.Linear(input_dim, embed_dim),
-            nn.LayerNorm(embed_dim),
-            nn.ReLU(),
-            nn.Linear(embed_dim, embed_dim),
-            nn.LayerNorm(embed_dim),
-        )
-
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass through the H-JEPA module.
@@ -119,7 +145,7 @@ class HJEPA(nn.Module):
             - The reconstruction loss.
             - The online features.
         """
-        if self.is_state_input:
+        if self.input_type == 'state':
             return self._forward_state(x)
         else:
             return self._forward_vision(x)
@@ -225,10 +251,11 @@ class HJEPA(nn.Module):
                 tau * target_param.data + (1 - tau) * online_param.data
             )
             
-        # Update projection
-        for online_param, target_param in zip(
-            self.online_projection.parameters(), self.target_projection.parameters()
-        ):
-            target_param.data.copy_(
-                tau * target_param.data + (1 - tau) * online_param.data
-            )
+        # Update projection (only if not identity)
+        if not isinstance(self.online_projection, nn.Identity):
+            for online_param, target_param in zip(
+                self.online_projection.parameters(), self.target_projection.parameters()
+            ):
+                target_param.data.copy_(
+                    tau * target_param.data + (1 - tau) * online_param.data
+                )

@@ -49,6 +49,8 @@ class CTLNN(nn.Module):
         # Network layers
         self.input_to_hidden = nn.Linear(self.input_dim, self.hidden_dim)
         self.hidden_to_hidden = nn.Linear(self.hidden_dim, self.hidden_dim)
+        # NOTE: hidden_to_output is kept for optional projection but not used in the main recurrence loop
+        # to avoid state dimension mismatch.
         self.hidden_to_output = nn.Linear(self.hidden_dim, self.output_dim)
 
     def init_state(self, batch_size: int) -> torch.Tensor:
@@ -103,9 +105,8 @@ class CTLNN(nn.Module):
         # Apply Euler integration to get the next hidden state
         h_next = h + self.dt * dh_dt
 
-        # Map to output dimension
-        h_out = self.hidden_to_output(h_next)
-        return h_out
+        # Return h_next directly for correct recurrence
+        return h_next
     
     def forward_ode(self, h: torch.Tensor, x: torch.Tensor, t_span: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
@@ -117,7 +118,7 @@ class CTLNN(nn.Module):
             t_span: Time span for integration
         
         Returns:
-            torch.Tensor: Next hidden state (B, output_dim)
+            torch.Tensor: Next hidden state (B, hidden_dim)
         """
         if not TORCHDIFFEQ_AVAILABLE:
             raise RuntimeError("ODE mode requires torchdiffeq. Install: pip install torchdiffeq")
@@ -137,9 +138,8 @@ class CTLNN(nn.Module):
         # Integrate
         h_trajectory = odeint(ode_func, h, t_span, method='dopri5')
         h_next = h_trajectory[-1]
-        h_out = self.hidden_to_output(h_next)
         
-        return h_out
+        return h_next
 
     def forward(self, h: Optional[torch.Tensor], x: torch.Tensor, t_span: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
@@ -151,7 +151,7 @@ class CTLNN(nn.Module):
             t_span: Time span for ODE mode
         
         Returns:
-            torch.Tensor: Next hidden state (B, output_dim)
+            torch.Tensor: Next hidden state (B, hidden_dim)
         """
         batch_size = x.shape[0]
         
@@ -174,4 +174,3 @@ class CTLNN(nn.Module):
             raise RuntimeError("ODE mode requires torchdiffeq")
         self.mode = mode
         print(f"CT-LNN mode: {mode}")
-
