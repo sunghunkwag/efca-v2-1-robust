@@ -45,6 +45,21 @@ def main():
         agent.parameters(),
         lr=config["training"]["learning_rate"],
     )
+    
+    # Setup checkpoint directory
+    checkpoint_dir = config['training'].get('checkpoint_dir', 'checkpoints')
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    
+    # Load checkpoint if exists
+    start_episode = 0
+    checkpoint_path = os.path.join(checkpoint_dir, 'latest_checkpoint.pt')
+    if os.path.exists(checkpoint_path):
+        print(f"Loading checkpoint from {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path)
+        agent.load_state_dict(checkpoint['agent_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_episode = checkpoint['episode']
+        print(f"Resuming from episode {start_episode}")
 
     # Setup checkpoint directory
     checkpoint_dir = config['training'].get('checkpoint_dir', 'checkpoints')
@@ -78,7 +93,7 @@ def main():
     print(f"Starting Phase {config.get('phase', 0)}: 'Zombie' Agent training loop on {device}.")
     print(f"Training for {config['training']['num_episodes']} episodes")
     print("-" * 80)
-
+    
     # Training loop
     for episode in range(start_episode, config["training"]["num_episodes"]):
         obs, _ = env.reset()
@@ -143,25 +158,25 @@ def main():
 
         optimizer.zero_grad()
         loss.backward()
-
+        
         # Gradient Clipping as per specification Section 4 (line 162)
         # "Gradient Clipping is mandatory"
         torch.nn.utils.clip_grad_norm_(agent.parameters(), max_norm=1.0)
-
+        
         optimizer.step()
-
+        
         # Update H-JEPA target encoder with EMA
         if hasattr(agent, 'perception') and hasattr(agent.perception, 'update_target_encoder'):
             ema_tau = config.get('h_jepa', {}).get('ema_tau', 0.996)
             agent.perception.update_target_encoder(tau=ema_tau)
-
+        
         # Logging
         log_interval = config['training'].get('log_interval', 10)
         if (episode + 1) % log_interval == 0:
             print(f"Episode {episode + 1}/{config['training']['num_episodes']}: "
                   f"Reward={total_reward:.2f}, Loss={loss.item():.4f}, "
                   f"Perception Loss={mean_perception_loss.item():.4f}")
-
+        
         # Save checkpoint periodically
         save_interval = config['training'].get('save_interval', 100)
         if (episode + 1) % save_interval == 0:
@@ -184,7 +199,7 @@ def main():
     final_path = os.path.join(checkpoint_dir, 'final_checkpoint.pt')
     torch.save(final_checkpoint, final_path)
     print(f"\nTraining complete! Final checkpoint saved to {final_path}")
-
+    
     # Cleanup
     if hasattr(agent, 'cleanup'):
         agent.cleanup()

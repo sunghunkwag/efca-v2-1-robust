@@ -15,9 +15,9 @@ class TaskPolicy(nn.Module):
     """
 
     def __init__(
-        self,
-        hidden_dim: int,
-        action_dim: int,
+        self, 
+        hidden_dim: int, 
+        action_dim: int, 
         action_space_type: Literal['discrete', 'continuous'] = 'discrete'
     ) -> None:
         """

@@ -8,17 +8,17 @@ def verify_mujoco():
         # Try to make the environment
         env = gym.make("Ant-v4", render_mode="rgb_array")
         print("Successfully created Ant-v4 environment.")
-
+        
         # Reset
         obs, info = env.reset()
         print(f"Observation space: {env.observation_space}")
         print(f"Action space: {env.action_space}")
-
+        
         # Step
         action = env.action_space.sample()
         obs, reward, terminated, truncated, info = env.step(action)
         print("Successfully ran one step.")
-
+        
         env.close()
         print("MuJoCo verification PASSED.")
         return True

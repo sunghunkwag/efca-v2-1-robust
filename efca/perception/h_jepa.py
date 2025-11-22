@@ -30,11 +30,10 @@ class HJEPA(nn.Module):
         # Hinge loss fallback (specification Section 3)
         self.use_hinge_loss = config.get('use_hinge_loss', False)
         self.hinge_margin = config.get('hinge_margin', 1.0)
-        self.input_shape = config.get('input_shape', None)
 
-        # Determine if we are in state mode or vision mode
-        self.is_state_input = (
-            self.input_shape is not None and len(self.input_shape) == 1
+        # Online Encoder (ConvNeXt-Tiny)
+        self.online_encoder: nn.Module = timm.create_model(
+            "convnext_tiny", pretrained=True, features_only=True
         )
 
         if self.is_state_input:
@@ -58,23 +57,17 @@ class HJEPA(nn.Module):
 
         # Predictor Network (MLP)
         # Note: The predictor must handle the same embedding dimension as the encoder output.
+        # ConvNeXt-Tiny output dim is 768
+        self.backbone_dim = 768
 
-        if not self.is_state_input:
-            # ConvNeXt-Tiny output dim is 768
-            self.backbone_dim = 768
-
-            # Projections to embedding dimension
-            self.online_projection = nn.Linear(self.backbone_dim, self.embed_dim)
-            self.target_projection = nn.Linear(self.backbone_dim, self.embed_dim)
-
-            # Initialize target projection with online projection weights
-            self.target_projection.load_state_dict(self.online_projection.state_dict())
-            for param in self.target_projection.parameters():
-                param.requires_grad = False
-        else:
-            # For state input, the MLP encoder already outputs embed_dim
-            self.online_projection = None
-            self.target_projection = None
+        # Projections to embedding dimension
+        self.online_projection = nn.Linear(self.backbone_dim, self.embed_dim)
+        self.target_projection = nn.Linear(self.backbone_dim, self.embed_dim)
+        
+        # Initialize target projection with online projection weights
+        self.target_projection.load_state_dict(self.online_projection.state_dict())
+        for param in self.target_projection.parameters():
+            param.requires_grad = False
 
         # Predictor Network (MLP)
         self.predictor: nn.Module = self._build_predictor(self.embed_dim, predictor_depth)
@@ -208,10 +201,10 @@ class HJEPA(nn.Module):
                 predicted_features * (1 - mask.float()),
                 target_features * (1 - mask.float()),
             )
-
+        
         # Add L2 regularization term to prevent representation collapse
         l2_regularization = self.gamma_reg * (online_features ** 2).mean()
-
+        
         # Total loss with regularization
         loss = reconstruction_loss + l2_regularization
 
@@ -231,12 +224,11 @@ class HJEPA(nn.Module):
             target_param.data.copy_(
                 tau * target_param.data + (1 - tau) * online_param.data
             )
-
-        # Update projection if it exists
-        if self.online_projection is not None and self.target_projection is not None:
-            for online_param, target_param in zip(
-                self.online_projection.parameters(), self.target_projection.parameters()
-            ):
-                target_param.data.copy_(
-                    tau * target_param.data + (1 - tau) * online_param.data
-                )
+            
+        # Update projection
+        for online_param, target_param in zip(
+            self.online_projection.parameters(), self.target_projection.parameters()
+        ):
+            target_param.data.copy_(
+                tau * target_param.data + (1 - tau) * online_param.data
+            )

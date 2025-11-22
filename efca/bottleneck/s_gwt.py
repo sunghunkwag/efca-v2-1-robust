@@ -44,30 +44,30 @@ class SGWT(nn.Module):
     def soft_topk(self, x, k, dim=-1, temperature=1.0):
         """
         Differentiable Soft-TopK approximation.
-
+        
         Args:
             x: Input tensor
             k: Number of top elements to keep
             dim: Dimension to apply TopK
             temperature: Softmax temperature
-
+            
         Returns:
             Soft-TopK probabilities
         """
         # Get top-k indices and values
         topk_val, _ = torch.topk(x, k, dim=dim)
-
+        
         # Create a mask for non-top-k values
         # We use the k-th largest value as the threshold
         # We use the k-th largest value as the threshold
         # topk_val is sorted, so the k-th largest is at index k-1
         threshold = topk_val.select(dim, k-1).unsqueeze(dim)
-
+        
         # Mask values below threshold with large negative number
         mask = x < threshold
         masked_x = x.clone()
         masked_x[mask] = -float('inf')
-
+        
         # Apply Softmax
         return F.softmax(masked_x / temperature, dim=dim)
 
@@ -98,21 +98,21 @@ class SGWT(nn.Module):
             # Dot product attention
             # (B, Num_Slots, Dim) x (B, Num_Inputs, Dim) -> (B, Num_Slots, Num_Inputs)
             dots = torch.einsum('bid,bjd->bij', q, k) * (self.dim ** -0.5)
-
+            
             # Soft-TopK Routing
             # Each input should only route to Top-K slots
             # We apply Soft-TopK over the slots dimension (dim=1)
             k_routing = min(self.num_slots, self.topk)
             attn = self.soft_topk(dots, k=k_routing, dim=1) + self.eps
-
+            
             # Normalize over inputs (standard Slot Attention normalization)
-            # Note: The original paper normalizes over slots (dim=1) for the weights,
+            # Note: The original paper normalizes over slots (dim=1) for the weights, 
             # but then normalizes over inputs (dim=2) for the weighted mean?
             # Actually, original Slot Attention:
             # attn = softmax(dots, dim=1)  # Competition between slots for each input
             # updates = weighted_mean(attn + epsilon, v, dim=2)
             # Let's stick to the standard but with Soft-TopK replacing Softmax
-
+            
             attn = attn / attn.sum(dim=-1, keepdim=True) # Normalize over inputs
 
             # Weighted mean

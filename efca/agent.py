@@ -144,7 +144,7 @@ class EFCAgent(nn.Module):
                 lnn_state=h_new,
                 h_jepa_loss=perception_loss
             )
-
+        
         # 6. Meta-Control
         meta_delta = None
         if self.meta_enabled and self.meta_controller is not None:
@@ -170,7 +170,7 @@ class EFCAgent(nn.Module):
             elif action_type == 'get_content':
                 return self.browser.get_content()
         return "Browser not enabled"
-
+    
     def cleanup(self):
         """Clean up resources, especially browser if enabled."""
         if self.browser is not None:
