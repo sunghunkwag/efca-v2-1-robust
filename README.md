@@ -106,6 +106,66 @@ result = agent.execute_browser_action('screenshot', path='screenshot.png')
 agent.cleanup()
 ```
 
+### MuJoCo Benchmarking
+
+EFCA-v2.1 now supports high-dimensional continuous control tasks using MuJoCo environments.
+
+#### Prerequisites
+
+Install MuJoCo dependencies:
+```bash
+pip install gymnasium[mujoco]
+```
+
+#### Verify MuJoCo Installation
+
+Before running benchmarks, verify that MuJoCo is properly installed:
+```bash
+python experiments/verify_mujoco.py
+```
+
+This script will:
+- Check if `gymnasium[mujoco]` is installed
+- Load and test a sample MuJoCo environment (`Ant-v4`)
+- Display environment observation and action space dimensions
+
+#### Running MuJoCo Benchmarks
+
+To run benchmarks on MuJoCo environments:
+
+**Single environment:**
+```bash
+python experiments/run_benchmark.py --env Ant-v4 --episodes 10
+```
+
+**Multiple environments:**
+```bash
+python experiments/run_benchmark.py --env Ant-v4 HalfCheetah-v4 Humanoid-v4 --episodes 10
+```
+
+**Using MuJoCo configuration:**
+```bash
+python experiments/train.py --config configs/mujoco_config.yaml
+```
+
+#### Supported MuJoCo Environments
+
+The following high-dimensional continuous control environments are tested:
+- **Ant-v4**: Quadruped robot (111-dim obs, 8-dim action)
+- **HalfCheetah-v4**: 2D running robot (17-dim obs, 6-dim action)
+- **Humanoid-v4**: Bipedal humanoid (376-dim obs, 17-dim action)
+- **Walker2d-v4**: 2D bipedal walker (17-dim obs, 6-dim action)
+- **Hopper-v4**: Single-legged hopper (11-dim obs, 3-dim action)
+- **Swimmer-v4**: Swimming robot (8-dim obs, 2-dim action)
+
+#### Benchmark Results
+
+Benchmark results include:
+- Episode rewards (mean ± std)
+- Episode lengths
+- Success metrics
+- Performance across multiple episodes
+
 ## Testing
 
 ### Running All Tests
