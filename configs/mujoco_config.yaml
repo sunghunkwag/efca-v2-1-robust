@@ -1,0 +1,47 @@
+# EFCA-v2.1 MuJoCo Configuration
+
+# Phase Control
+phase: 0 # Start with Zombie agent for benchmarking baseline
+
+# Training settings
+training:
+  num_episodes: 1000 # Enough to show learning
+  batch_size: 64
+  learning_rate: 0.0003 # Typically lower for continuous control
+  device: 'cpu' # Benchmarking on CPU is standard for consistency, though GPU preferred if available
+  epsilon_start: 1.0 # Not used for continuous Gaussian policy (uses std dev)
+  survival_threshold: 100.0 # Higher threshold for MuJoCo
+
+# H-JEPA settings (Perception)
+h_jepa:
+  embed_dim: 256 # Smaller embedding for state-based inputs might be sufficient
+
+# s-GWT settings (Bottleneck)
+bottleneck:
+  num_slots: 4
+  dim: 256 # Matches H-JEPA embed_dim
+  iters: 3
+  hidden_dim: 512
+  topk: 2
+
+# CT-LNN settings (Dynamics)
+ct_lnn:
+  input_dim: 256
+  hidden_dim: 256
+  output_dim: 256
+  mode: 'discrete'
+
+# Task Policy settings (Action)
+task_policy:
+  hidden_dim: 256
+  action_space_type: 'continuous'
+
+# Meta-Control settings (Disabled in Phase 0)
+probe_network:
+  probe_dim: 64
+
+meta_controller:
+  max_delta: 0.05
+metacontrol:
+  input_dim: 64
+  output_dim: 1
