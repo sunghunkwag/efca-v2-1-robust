@@ -113,7 +113,10 @@ class TestProbeNetwork(unittest.TestCase):
             self.assertEqual(output.shape[1], self.config['output_dim'])
     
     def test_gradient_flow(self):
-        """Tests that gradients flow properly through the probe."""
+        """
+        Tests that gradients DO NOT flow through the probe to the inputs.
+        This confirms the 'Freezed Encoder' requirement.
+        """
         probe = ProbeNetwork(self.config)
         
         # Create dummy inputs with requires_grad=True
@@ -125,10 +128,10 @@ class TestProbeNetwork(unittest.TestCase):
         loss = output.sum()
         loss.backward()
         
-        # Check that gradients exist
-        self.assertIsNotNone(h_jepa_features.grad)
-        self.assertIsNotNone(gwt_slots.grad)
-        self.assertIsNotNone(lnn_state.grad)
+        # Check that gradients are None (detached)
+        self.assertIsNone(h_jepa_features.grad)
+        self.assertIsNone(gwt_slots.grad)
+        self.assertIsNone(lnn_state.grad)
 
 
 if __name__ == '__main__':

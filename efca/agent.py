@@ -18,27 +18,23 @@ class EFCAgent(nn.Module):
         self.phase = config.get('phase', 0)
         self.meta_enabled = (self.phase > 0)
 
-        # Initialize modules
-        # Note: HJEPA and others might need specific kwargs unwrapped from config sub-dicts
-        # depending on how they are implemented. Assuming they take a config dict or kwargs.
-        # Based on previous file reads:
-        # HJEPA(embed_dim=...)
-        # CTLNN(input_dim=..., hidden_dim=..., output_dim=...)
-        # TaskPolicy(hidden_dim=..., action_dim=...)
-        # SGWT(config) - takes a dict/object
-        # ClampedMetaController(config) - takes a dict/object
-
-        # To handle the discrepancy between dictionary access and object attribute access
-        # (config.perception vs config['perception']), I will convert config to a standard format
-        # or handle it robustly. Assuming config is a dictionary from yaml.safe_load.
-
         # Helper to access config safely whether it's dict or object
         def get_cfg(c, key):
             if isinstance(c, dict):
                 return c.get(key)
             return getattr(c, key, None)
 
-        self.perception = HJEPA(config=get_cfg(config, 'h_jepa'))
+        # Handle H-JEPA configuration
+        h_jepa_cfg = get_cfg(config, 'h_jepa')
+        if isinstance(h_jepa_cfg, dict):
+            # Ensure input_type and input_dim are propagated if they exist in root config
+            # and are not already in h_jepa_cfg
+            if 'input_type' not in h_jepa_cfg and get_cfg(config, 'input_type'):
+                h_jepa_cfg['input_type'] = get_cfg(config, 'input_type')
+            if 'input_dim' not in h_jepa_cfg and get_cfg(config, 'input_dim'):
+                h_jepa_cfg['input_dim'] = get_cfg(config, 'input_dim')
+
+        self.perception = HJEPA(config=h_jepa_cfg)
 
         # SGWT expects a config object/dict itself in its __init__
         self.bottleneck = SGWT(get_cfg(config, 'bottleneck'))
